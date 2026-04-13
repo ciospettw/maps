@@ -150,6 +150,49 @@ rescue
   false
 end
 
+def $RNMapboxMaps._patch_mapbox_swift_imports(installer)
+  mapbox_sources_root = File.join(installer.sandbox.root.to_s, 'MapboxMaps', 'Sources', 'MapboxMaps')
+  return unless Dir.exist?(mapbox_sources_root)
+
+  patched_files = 0
+  Dir.glob(File.join(mapbox_sources_root, '**', '*.swift')).each do |file_path|
+    contents = File.read(file_path)
+
+    imports = []
+    imports << "import MapboxCoreMaps\n" unless contents.include?('import MapboxCoreMaps')
+    imports << "import MapboxCommon\n" unless contents.include?('import MapboxCommon')
+    next if imports.empty?
+
+    File.chmod(0644, file_path)
+    File.write(file_path, imports.join + contents)
+    patched_files += 1
+  end
+
+  puts "* [RNMapbox] Added explicit Mapbox imports to #{patched_files} MapboxMaps Swift files" if patched_files > 0
+end
+
+def $RNMapboxMaps._disable_explicit_modules(project)
+  project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+      config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
+      config.build_settings['_EXPERIMENTAL_SWIFT_EXPLICIT_MODULES'] = 'NO'
+      config.build_settings['SWIFT_USE_INTEGRATED_DRIVER'] = 'NO'
+      config.build_settings['SWIFT_ENABLE_INCREMENTAL_COMPILATION'] = 'NO'
+      config.build_settings['SWIFT_COMPILATION_MODE'] = 'wholemodule'
+    end
+  end
+
+  project.build_configurations.each do |config|
+    config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+    config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
+    config.build_settings['_EXPERIMENTAL_SWIFT_EXPLICIT_MODULES'] = 'NO'
+    config.build_settings['SWIFT_USE_INTEGRATED_DRIVER'] = 'NO'
+    config.build_settings['SWIFT_ENABLE_INCREMENTAL_COMPILATION'] = 'NO'
+    config.build_settings['SWIFT_COMPILATION_MODE'] = 'wholemodule'
+  end
+end
+
 def $RNMapboxMaps.post_install(installer)
   map_pod = installer.pod_targets.find {|p| p.name == "MapboxMaps" }
   use_v11 = $RNMapboxMapsUseV11Imp || (map_pod && map_pod.version.split('.')[0].to_i >= 11)
@@ -158,6 +201,9 @@ def $RNMapboxMaps.post_install(installer)
       config.build_settings['OTHER_SWIFT_FLAGS'] ||= ['$(inherited)', '-D RNMBX_11']
     end
   end
+
+  self._disable_explicit_modules(installer.pods_project)
+  self._patch_mapbox_swift_imports(installer)
 
   if $RNMapboxMapsSwiftPackageManager
     return if $RNMapboxMapsSwiftPackageManager == "manual"
@@ -188,6 +234,7 @@ def $RNMapboxMaps.post_install(installer)
   else
     self._check_no_mapbox_spm(installer.pods_project)
     installer.aggregate_targets.group_by(&:user_project).each do |project, targets|
+      self._disable_explicit_modules(project)
       targets.each do |target|
         target.user_targets.each do |user_target|
           self._check_no_mapbox_spm(project)
